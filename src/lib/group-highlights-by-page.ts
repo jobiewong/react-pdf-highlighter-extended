@@ -17,8 +17,7 @@ const groupHighlightsByPage = (
       ...highlight.position.rects.map((rect) => rect.pageNumber || 0),
     ];
 
-    // remove potential duplicate page numbers due from
-    // text highlights
+    // remove potential duplicate page numbers from text highlights
     const uniquePageNumbers = new Set(pageNumbers);
 
     uniquePageNumbers.forEach((pageNumber) => {
