@@ -481,7 +481,17 @@ export const PdfHighlighter = ({
 
   const scrollToHighlight = (highlight: Highlight) => {
     const { boundingRect, usePdfCoordinates } = highlight.position;
-    const pageNumber = boundingRect.pageNumber;
+    const pageNumber = Number(boundingRect.pageNumber);
+
+    // Validate page number
+    if (
+      isNaN(pageNumber) ||
+      pageNumber < 1 ||
+      pageNumber > pdfDocument.numPages
+    ) {
+      console.warn(`Invalid page number: ${boundingRect.pageNumber}`);
+      return;
+    }
 
     // Remove scroll listener in case user auto-scrolls in succession.
     viewerRef.current!.container.removeEventListener("scroll", handleScroll);
