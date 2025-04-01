@@ -1,9 +1,9 @@
 {
-  "name": "react-pdf-highlighter-extended",
+  "name": "react-pdf-highlighter-custom",
   "type": "module",
-  "version": "8.1.0",
-  "description": "Set of modern React components for PDF highlighting",
-  "author": "Daniel Arnould <daniel.s.arnould@gmail.com>",
+  "version": "8.4.0",
+  "description": "Updated fork of react-pdf-highlighter-extended-update",
+  "author": "Jobie Wong",
   "license": "MIT",
   "contributors": [
     {
@@ -13,7 +13,11 @@
     {
       "name": "Artem Tyurin",
       "email": "artem.tyurin@gmail.com"
+    },
+    {
+      "name": "Peter Bull"
     }
+
   ],
   "keywords": [
     "pdf",

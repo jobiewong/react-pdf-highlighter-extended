@@ -1,7 +1,16 @@
 import React, { ReactNode, useEffect, useRef, useState } from "react";
 
-import { GlobalWorkerOptions, OnProgressParameters, getDocument, type PDFDocumentLoadingTask, type PDFDocumentProxy } from "pdfjs-dist";
-import { DocumentInitParameters, TypedArray } from "pdfjs-dist/types/src/display/api";
+import {
+  GlobalWorkerOptions,
+  OnProgressParameters,
+  getDocument,
+  type PDFDocumentLoadingTask,
+  type PDFDocumentProxy,
+} from "pdfjs-dist";
+import {
+  DocumentInitParameters,
+  TypedArray,
+} from "pdfjs-dist/types/src/display/api";
 
 const DEFAULT_BEFORE_LOAD = (progress: OnProgressParameters) => (
   <div style={{ color: "black" }}>
@@ -66,6 +75,13 @@ export interface PdfLoaderProps {
   onError?(error: Error): void;
 
   /**
+   * Callback triggered when the PDF document has finished loading.
+   *
+   * @param pdfDocument - The loaded PDF document.
+   */
+  onLoad?(pdfDocument: PDFDocumentProxy): void;
+
+  /**
    * NOTE: This will be applied to all PdfLoader instances.
    * If you want to only apply a source to this instance, use the document parameters.
    */
@@ -83,6 +99,7 @@ export const PdfLoader = ({
   errorMessage = DEFAULT_ERROR_MESSAGE,
   children,
   onError = DEFAULT_ON_ERROR,
+  onLoad,
   workerSrc = DEFAULT_WORKER_SRC,
 }: PdfLoaderProps) => {
   const pdfLoadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null);
@@ -103,6 +120,7 @@ export const PdfLoader = ({
     pdfLoadingTaskRef.current.promise
       .then((pdfDocument: PDFDocumentProxy) => {
         pdfDocumentRef.current = pdfDocument;
+        onLoad?.(pdfDocument);
       })
       .catch((error: Error) => {
         if (error.message != "Worker was destroyed") {
@@ -128,6 +146,6 @@ export const PdfLoader = ({
   return error
     ? errorMessage(error)
     : loadingProgress
-      ? beforeLoad(loadingProgress)
-      : pdfDocumentRef.current && children(pdfDocumentRef.current);
+    ? beforeLoad(loadingProgress)
+    : pdfDocumentRef.current && children(pdfDocumentRef.current);
 };
