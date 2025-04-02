@@ -376,7 +376,17 @@ export const PdfHighlighter = ({
 
   const handleScaleValue = () => {
     if (viewerRef.current) {
-      viewerRef.current.currentScaleValue = pdfScaleValue.toString();
+      const scaleValue = pdfScaleValue.toString();
+      if (scaleValue === "auto") {
+        viewerRef.current.currentScaleValue = "auto";
+      }
+      else {
+        const numericScale = parseFloat(scaleValue);
+        if (!isNaN(numericScale)) {
+          viewerRef.current.currentScaleValue = numericScale;
+        }
+      }
+    }
     }
   };
 
@@ -500,18 +510,17 @@ export const PdfHighlighter = ({
       pageNumber - 1
     ).viewport;
 
-    viewerRef.current!.scrollPageIntoView({
-      pageNumber,
-      destArray: [
-        null, // null since we pass pageNumber already as an arg
-        { name: "XYZ" },
-        ...pageViewport.convertToPdfPoint(
-          0, // Default x coord
-          scaledToViewport(boundingRect, pageViewport, usePdfCoordinates).top -
-            SCROLL_MARGIN
-        ),
-        0, // Default z coord
-      ],
+    // Get the page element
+    const pageElement = viewerRef.current!.getPageView(pageNumber - 1).div;
+    
+    // Calculate the target scroll position
+    const scaledPosition = scaledToViewport(boundingRect, pageViewport, usePdfCoordinates);
+    const targetScrollTop = pageElement.offsetTop + scaledPosition.top - SCROLL_MARGIN;
+
+    // Use smooth scrolling
+    viewerRef.current!.container.scrollTo({
+      top: targetScrollTop,
+      behavior: 'smooth'
     });
 
     scrolledToHighlightIdRef.current = highlight.id;
