@@ -379,14 +379,12 @@ export const PdfHighlighter = ({
       const scaleValue = pdfScaleValue.toString();
       if (scaleValue === "auto") {
         viewerRef.current.currentScaleValue = "auto";
-      }
-      else {
+      } else {
         const numericScale = parseFloat(scaleValue);
         if (!isNaN(numericScale)) {
           viewerRef.current.currentScaleValue = numericScale;
         }
       }
-    }
     }
   };
 
@@ -512,15 +510,20 @@ export const PdfHighlighter = ({
 
     // Get the page element
     const pageElement = viewerRef.current!.getPageView(pageNumber - 1).div;
-    
+
     // Calculate the target scroll position
-    const scaledPosition = scaledToViewport(boundingRect, pageViewport, usePdfCoordinates);
-    const targetScrollTop = pageElement.offsetTop + scaledPosition.top - SCROLL_MARGIN;
+    const scaledPosition = scaledToViewport(
+      boundingRect,
+      pageViewport,
+      usePdfCoordinates
+    );
+    const targetScrollTop =
+      pageElement.offsetTop + scaledPosition.top - SCROLL_MARGIN;
 
     // Use smooth scrolling
     viewerRef.current!.container.scrollTo({
       top: targetScrollTop,
-      behavior: 'smooth'
+      behavior: "smooth",
     });
 
     scrolledToHighlightIdRef.current = highlight.id;
