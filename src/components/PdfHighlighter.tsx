@@ -267,9 +267,10 @@ export const PdfHighlighter = ({
 
   // Initialise viewer event listeners
   useLayoutEffect(() => {
-    if (!containerNodeRef.current) return;
+    if (!containerNodeRef.current || !viewerRef.current) return;
 
-    resizeObserverRef.current = new ResizeObserver(handleScaleValue);
+    const debouncedScaleValue = debounce(handleScaleValue, 100);
+    resizeObserverRef.current = new ResizeObserver(debouncedScaleValue);
     resizeObserverRef.current.observe(containerNodeRef.current);
 
     const doc = containerNodeRef.current.ownerDocument;
@@ -285,6 +286,7 @@ export const PdfHighlighter = ({
       eventBusRef.current.off("textlayerrendered", renderHighlightLayers);
       doc.removeEventListener("keydown", handleKeyDown);
       resizeObserverRef.current?.disconnect();
+      debouncedScaleValue.cancel();
     };
   }, [selectionTip, highlights, onSelectionFinished]);
 
@@ -375,16 +377,22 @@ export const PdfHighlighter = ({
   };
 
   const handleScaleValue = () => {
-    if (viewerRef.current) {
+    if (!viewerRef.current || !viewerRef.current.currentScaleValue) return;
+
+    try {
       const scaleValue = pdfScaleValue.toString();
       if (scaleValue === "auto") {
         viewerRef.current.currentScaleValue = "auto";
       } else {
         const numericScale = parseFloat(scaleValue);
         if (!isNaN(numericScale)) {
-          viewerRef.current.currentScaleValue = numericScale;
+          // Ensure the scale value is within valid range (0.1 to 10.0)
+          const validScale = Math.min(Math.max(numericScale, 0.1), 10.0);
+          viewerRef.current.currentScaleValue = validScale.toString();
         }
       }
+    } catch (error) {
+      console.warn("Error setting PDF scale value:", error);
     }
   };
 
