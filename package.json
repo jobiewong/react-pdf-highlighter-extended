@@ -1,7 +1,7 @@
 {
   "name": "react-pdf-highlighter-custom",
   "type": "module",
-  "version": "8.4.4",
+  "version": "8.4.5",
   "description": "Updated fork of react-pdf-highlighter-extended-update",
   "author": "Jobie Wong",
   "license": "MIT",
@@ -42,7 +42,7 @@
     "clean": "rm -rf dist public node_modules package-lock.json"
   },
   "peerDependencies": {
-    "react": "^18.3.1",
+    "react": "^19.1.0",
     "react-dom": "^18.3.1"
   },
   "dependencies": {
