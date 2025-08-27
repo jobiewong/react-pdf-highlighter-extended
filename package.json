@@ -1,7 +1,7 @@
 {
   "name": "react-pdf-highlighter-custom",
   "type": "module",
-  "version": "8.5.0",
+  "version": "8.5.1",
   "description": "Updated fork of react-pdf-highlighter-extended-update",
   "author": "Jobie Wong",
   "license": "MIT",
@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "lodash.debounce": "^4.0.8",
-    "pdfjs-dist": "^4.4.168",
+    "pdfjs-dist": "^5.4.54",
     "react-rnd": "^10.4.11"
   },
   "repository": {
