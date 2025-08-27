@@ -495,7 +495,7 @@ export const PdfHighlighter = ({
     selection.removeAllRanges();
   };
 
-  const scrollToHighlight = (highlight: Highlight) => {
+  const scrollToHighlight = (highlight: Highlight, paddingTop?: number) => {
     const { boundingRect, usePdfCoordinates } = highlight.position;
     const pageNumber = Number(boundingRect.pageNumber);
 
@@ -526,7 +526,10 @@ export const PdfHighlighter = ({
       usePdfCoordinates
     );
     const targetScrollTop =
-      pageElement.offsetTop + scaledPosition.top - SCROLL_MARGIN;
+      pageElement.offsetTop +
+      scaledPosition.top -
+      SCROLL_MARGIN +
+      (paddingTop ?? 0);
 
     // Use smooth scrolling
     viewerRef.current!.container.scrollTo({
