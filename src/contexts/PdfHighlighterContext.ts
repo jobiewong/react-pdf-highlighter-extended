@@ -1,6 +1,6 @@
+import { PDFViewer } from "pdfjs-dist/types/web/pdf_viewer";
 import { createContext, useContext } from "react";
 import { GhostHighlight, Highlight, PdfSelection, Tip } from "../types";
-import { PDFViewer } from "pdfjs-dist/types/web/pdf_viewer";
 
 /**
  * A set of utilities for to control the behaviour of {@link PdfHighlighter}.
@@ -60,8 +60,9 @@ export type PdfHighlighterUtils = {
    *
    * @param highlight - A highlight provided to the {@link PdfHighlighter} to
    * scroll to.
+   * @param paddingTop - Optional padding to add when scrolling to the highlight.
    */
-  scrollToHighlight(highlight: Highlight): void;
+  scrollToHighlight(highlight: Highlight, paddingTop?: number): void;
 
   /**
    * Get a reference to the currently used instance of a PDF Viewer.
@@ -106,7 +107,7 @@ export const usePdfHighlighterContext = () => {
 
   if (pdfHighlighterUtils === undefined) {
     throw new Error(
-      "usePdfHighlighterContext must be used within PdfHighlighter!",
+      "usePdfHighlighterContext must be used within PdfHighlighter!"
     );
   }
 
