@@ -248,9 +248,15 @@ export const PdfHighlighter = ({
 	);
 	const resizeObserverRef = useRef<ResizeObserver | null>(null);
 	const viewerRef = useRef<InstanceType<typeof PDFViewer> | null>(null);
-	const findControllerRef = useRef<InstanceType<typeof PDFFindController> | null>(
-		null,
-	);
+	const findControllerRef = useRef<InstanceType<
+		typeof PDFFindController
+	> | null>(null);
+	const searchStateRef = useRef<{
+		query: string;
+		caseSensitive: boolean;
+		entireWord: boolean;
+		highlightAll: boolean;
+	} | null>(null);
 
 	// Initialise PDF Viewer
 	useLayoutEffect(() => {
@@ -658,7 +664,7 @@ export const PdfHighlighter = ({
 			findPrevious?: boolean;
 		},
 	) => {
-		if (!findControllerRef.current) {
+		if (!findControllerRef.current || !eventBusRef.current) {
 			console.warn("PDF find controller is not ready");
 			return;
 		}
@@ -675,65 +681,83 @@ export const PdfHighlighter = ({
 			findPrevious = false,
 		} = options || {};
 
-		findControllerRef.current.executeCommand("find", {
+		// Store search state for findNext/findPrevious
+		searchStateRef.current = {
 			query,
 			caseSensitive,
 			entireWord,
 			highlightAll,
+		};
+
+		eventBusRef.current.dispatch("find", {
+			type: "",
+			query,
+			caseSensitive,
+			entireWord,
+			highlightAll,
+			phraseSearch: true,
 			findPrevious,
 		});
 	};
 
 	const findNext = () => {
-		if (!findControllerRef.current) {
+		if (!findControllerRef.current || !eventBusRef.current) {
 			console.warn("PDF find controller is not ready");
 			return;
 		}
 
-		const state = findControllerRef.current.state;
-		if (!state.query) {
+		const state = searchStateRef.current;
+		if (!state || !state.query) {
 			console.warn("No active search query");
 			return;
 		}
 
-		findControllerRef.current.executeCommand("findagain", {
+		eventBusRef.current.dispatch("findagain", {
+			type: "",
 			query: state.query,
 			caseSensitive: state.caseSensitive,
 			entireWord: state.entireWord,
 			highlightAll: state.highlightAll,
+			phraseSearch: true,
 			findPrevious: false,
 		});
 	};
 
 	const findPrevious = () => {
-		if (!findControllerRef.current) {
+		if (!findControllerRef.current || !eventBusRef.current) {
 			console.warn("PDF find controller is not ready");
 			return;
 		}
 
-		const state = findControllerRef.current.state;
-		if (!state.query) {
+		const state = searchStateRef.current;
+		if (!state || !state.query) {
 			console.warn("No active search query");
 			return;
 		}
 
-		findControllerRef.current.executeCommand("findagain", {
+		eventBusRef.current.dispatch("findagain", {
+			type: "",
 			query: state.query,
 			caseSensitive: state.caseSensitive,
 			entireWord: state.entireWord,
 			highlightAll: state.highlightAll,
+			phraseSearch: true,
 			findPrevious: true,
 		});
 	};
 
 	const clearSearch = () => {
-		if (!findControllerRef.current) {
+		if (!eventBusRef.current) {
 			return;
 		}
 
-		findControllerRef.current.executeCommand("find", {
+		searchStateRef.current = null;
+
+		eventBusRef.current.dispatch("find", {
+			type: "",
 			query: "",
 			highlightAll: false,
+			phraseSearch: true,
 		});
 	};
 
@@ -794,9 +818,9 @@ export const PdfHighlighter = ({
 				{isViewerReady && enableAreaSelection && (
 					<MouseSelection
 						viewer={viewerRef.current!}
-						onChange={(isVisible) =>
-							(isAreaSelectionInProgressRef.current = isVisible)
-						}
+						onChange={(isVisible) => {
+							isAreaSelectionInProgressRef.current = isVisible;
+						}}
 						enableAreaSelection={enableAreaSelection}
 						style={mouseSelectionStyle}
 						onDragStart={() => disableTextSelection(viewerRef.current!, true)}
