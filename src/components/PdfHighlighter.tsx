@@ -176,6 +176,13 @@ export interface PdfHighlighterProps {
   onViewerReady?(viewer: InstanceType<typeof PDFViewer>): void;
 
   /**
+   * Callback triggered whenever the current page changes.
+   *
+   * @param pageNumber - The new current page number (1-indexed).
+   */
+  onPageChange?(pageNumber: number): void;
+
+  /**
    * Style properties for the PdfHighlighter (scrollbar, background, etc.), NOT
    * the PDF.js viewer it encloses. If you want to edit the latter, use the
    * other style props like `textSelectionColor` or overwrite pdf_viewer.css
@@ -208,11 +215,13 @@ export const PdfHighlighter = ({
   textSelectionColor = DEFAULT_TEXT_SELECTION_COLOR,
   utilsRef,
   onViewerReady,
+  onPageChange,
   style,
 }: PdfHighlighterProps) => {
   // State
   const [tip, setTip] = useState<Tip | null>(null);
   const [isViewerReady, setIsViewerReady] = useState(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Refs
   const containerNodeRef = useRef<HTMLDivElement | null>(null);
@@ -255,6 +264,15 @@ export const PdfHighlighter = ({
       linkServiceRef.current.setDocument(pdfDocument);
       linkServiceRef.current.setViewer(viewerRef.current);
       setIsViewerReady(true);
+      
+      // Initialize current page from viewer (may not be available immediately)
+      // The pagechanged event will update it once the viewer is ready
+      if (viewerRef.current.currentPageNumber) {
+        const initialPage = viewerRef.current.currentPageNumber;
+        setCurrentPage(initialPage);
+        onPageChange?.(initialPage);
+      }
+      
       onViewerReady?.(viewerRef.current);
     }, 100);
 
@@ -275,20 +293,40 @@ export const PdfHighlighter = ({
 
     const doc = containerNodeRef.current.ownerDocument;
 
+    const handlePageChanged = (event: { pageNumber: number }) => {
+      const newPage = event.pageNumber;
+      setCurrentPage(newPage);
+      onPageChange?.(newPage);
+    };
+
+    const handlePagesInit = () => {
+      handleScaleValue();
+      // Initialize current page when pages are initialized
+      if (viewerRef.current?.currentPageNumber) {
+        const initialPage = viewerRef.current.currentPageNumber;
+        setCurrentPage(initialPage);
+        onPageChange?.(initialPage);
+      }
+    };
+
     eventBusRef.current.on("textlayerrendered", renderHighlightLayers);
-    eventBusRef.current.on("pagesinit", handleScaleValue);
+    eventBusRef.current.on("pagesinit", handlePagesInit);
+    eventBusRef.current.on("pagechanged", handlePageChanged);
     doc.addEventListener("keydown", handleKeyDown);
 
     renderHighlightLayers();
 
+    renderHighlightLayers();
+
     return () => {
-      eventBusRef.current.off("pagesinit", handleScaleValue);
+      eventBusRef.current.off("pagesinit", handlePagesInit);
       eventBusRef.current.off("textlayerrendered", renderHighlightLayers);
+      eventBusRef.current.off("pagechanged", handlePageChanged);
       doc.removeEventListener("keydown", handleKeyDown);
       resizeObserverRef.current?.disconnect();
       debouncedScaleValue.cancel();
     };
-  }, [selectionTip, highlights, onSelectionFinished]);
+  }, [selectionTip, highlights, onSelectionFinished, onPageChange]);
 
   // Event listeners
   const handleScroll = () => {
@@ -548,6 +586,28 @@ export const PdfHighlighter = ({
     }, 100);
   };
 
+  const goToPage = (pageNumber: number) => {
+    if (!viewerRef.current) {
+      console.warn("PDF viewer is not ready");
+      return;
+    }
+
+    // Validate page number is within bounds
+    if (
+      isNaN(pageNumber) ||
+      pageNumber < 1 ||
+      pageNumber > pdfDocument.numPages
+    ) {
+      console.warn(
+        `Invalid page number: ${pageNumber}. Must be between 1 and ${pdfDocument.numPages}`
+      );
+      return;
+    }
+
+    // Use PDF.js scrollPageIntoView to navigate
+    viewerRef.current.scrollPageIntoView({ pageNumber });
+  };
+
   const pdfHighlighterUtils: PdfHighlighterUtils = {
     isEditingOrHighlighting,
     getCurrentSelection: () => selectionRef.current,
@@ -562,6 +622,8 @@ export const PdfHighlighter = ({
     getTip: () => tip,
     setTip,
     updateTipPosition: updateTipPositionRef.current,
+    getCurrentPage: () => currentPage,
+    goToPage,
   };
 
   utilsRef(pdfHighlighterUtils);

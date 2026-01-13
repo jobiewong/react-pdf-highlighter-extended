@@ -90,6 +90,20 @@ export type PdfHighlighterUtils = {
    * the tip is visible above/below its highlight.
    */
   updateTipPosition(): void;
+
+  /**
+   * Get the current page number being viewed.
+   *
+   * @returns - The current 1-indexed page number.
+   */
+  getCurrentPage(): number;
+
+  /**
+   * Navigate to a specific page in the PDF viewer.
+   *
+   * @param pageNumber - The 1-indexed page number to navigate to.
+   */
+  goToPage(pageNumber: number): void;
 };
 
 export const PdfHighlighterContext = createContext<
