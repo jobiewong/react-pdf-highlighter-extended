@@ -6,6 +6,7 @@ import debounce from "lodash.debounce";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type {
 	EventBus as TEventBus,
+	PDFFindController as TPDFFindController,
 	PDFLinkService as TPDFLinkService,
 	PDFViewer as TPDFViewer,
 } from "pdfjs-dist/web/pdf_viewer.mjs";
@@ -49,6 +50,7 @@ import { MouseSelection } from "./MouseSelection";
 import { TipContainer } from "./TipContainer";
 
 let EventBus: typeof TEventBus,
+	PDFFindController: typeof TPDFFindController,
 	PDFLinkService: typeof TPDFLinkService,
 	PDFViewer: typeof TPDFViewer;
 
@@ -56,6 +58,7 @@ let EventBus: typeof TEventBus,
 	// Due to breaking changes in PDF.js 4.0.189. See issue #17228
 	const pdfjs = await import("pdfjs-dist/web/pdf_viewer.mjs");
 	EventBus = pdfjs.EventBus;
+	PDFFindController = pdfjs.PDFFindController;
 	PDFLinkService = pdfjs.PDFLinkService;
 	PDFViewer = pdfjs.PDFViewer;
 })();
@@ -245,6 +248,9 @@ export const PdfHighlighter = ({
 	);
 	const resizeObserverRef = useRef<ResizeObserver | null>(null);
 	const viewerRef = useRef<InstanceType<typeof PDFViewer> | null>(null);
+	const findControllerRef = useRef<InstanceType<typeof PDFFindController> | null>(
+		null,
+	);
 
 	// Initialise PDF Viewer
 	useLayoutEffect(() => {
@@ -261,9 +267,18 @@ export const PdfHighlighter = ({
 					linkService: linkServiceRef.current,
 				});
 
+			// Initialize find controller
+			findControllerRef.current =
+				findControllerRef.current ||
+				new PDFFindController({
+					eventBus: eventBusRef.current,
+					linkService: linkServiceRef.current,
+				});
+
 			viewerRef.current.setDocument(pdfDocument);
 			linkServiceRef.current.setDocument(pdfDocument);
 			linkServiceRef.current.setViewer(viewerRef.current);
+			findControllerRef.current.setDocument(pdfDocument);
 			setIsViewerReady(true);
 
 			// Initialize current page from viewer (may not be available immediately)
@@ -634,6 +649,94 @@ export const PdfHighlighter = ({
 		linkServiceRef.current.goToPage(pageNumber);
 	};
 
+	const searchText = (
+		query: string,
+		options?: {
+			caseSensitive?: boolean;
+			entireWord?: boolean;
+			highlightAll?: boolean;
+			findPrevious?: boolean;
+		},
+	) => {
+		if (!findControllerRef.current) {
+			console.warn("PDF find controller is not ready");
+			return;
+		}
+
+		if (!query.trim()) {
+			clearSearch();
+			return;
+		}
+
+		const {
+			caseSensitive = false,
+			entireWord = false,
+			highlightAll = true,
+			findPrevious = false,
+		} = options || {};
+
+		findControllerRef.current.executeCommand("find", {
+			query,
+			caseSensitive,
+			entireWord,
+			highlightAll,
+			findPrevious,
+		});
+	};
+
+	const findNext = () => {
+		if (!findControllerRef.current) {
+			console.warn("PDF find controller is not ready");
+			return;
+		}
+
+		const state = findControllerRef.current.state;
+		if (!state.query) {
+			console.warn("No active search query");
+			return;
+		}
+
+		findControllerRef.current.executeCommand("findagain", {
+			query: state.query,
+			caseSensitive: state.caseSensitive,
+			entireWord: state.entireWord,
+			highlightAll: state.highlightAll,
+			findPrevious: false,
+		});
+	};
+
+	const findPrevious = () => {
+		if (!findControllerRef.current) {
+			console.warn("PDF find controller is not ready");
+			return;
+		}
+
+		const state = findControllerRef.current.state;
+		if (!state.query) {
+			console.warn("No active search query");
+			return;
+		}
+
+		findControllerRef.current.executeCommand("findagain", {
+			query: state.query,
+			caseSensitive: state.caseSensitive,
+			entireWord: state.entireWord,
+			highlightAll: state.highlightAll,
+			findPrevious: true,
+		});
+	};
+
+	const clearSearch = () => {
+		if (!findControllerRef.current) {
+			return;
+		}
+
+		findControllerRef.current.executeCommand("find", {
+			query: "",
+			highlightAll: false,
+		});
+	};
+
 	const pdfHighlighterUtils: PdfHighlighterUtils = {
 		isEditingOrHighlighting,
 		getCurrentSelection: () => selectionRef.current,
@@ -657,6 +760,10 @@ export const PdfHighlighter = ({
 			return 1; // Default to page 1
 		},
 		goToPage,
+		searchText,
+		findNext,
+		findPrevious,
+		clearSearch,
 	};
 
 	utilsRef(pdfHighlighterUtils);

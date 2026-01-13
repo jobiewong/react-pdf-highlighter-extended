@@ -104,6 +104,41 @@ export type PdfHighlighterUtils = {
    * @param pageNumber - The 1-indexed page number to navigate to.
    */
   goToPage(pageNumber: number): void;
+
+  /**
+   * Search for text in the PDF document.
+   *
+   * @param query - The text string to search for.
+   * @param options - Optional search parameters.
+   * @param options.caseSensitive - Whether search should be case sensitive.
+   * @param options.entireWord - Whether to match entire words only.
+   * @param options.highlightAll - Whether to highlight all matches.
+   * @param options.findPrevious - Whether to find previous match instead of next.
+   */
+  searchText(
+    query: string,
+    options?: {
+      caseSensitive?: boolean;
+      entireWord?: boolean;
+      highlightAll?: boolean;
+      findPrevious?: boolean;
+    }
+  ): void;
+
+  /**
+   * Navigate to the next search result.
+   */
+  findNext(): void;
+
+  /**
+   * Navigate to the previous search result.
+   */
+  findPrevious(): void;
+
+  /**
+   * Clear the current search and remove all search highlights.
+   */
+  clearSearch(): void;
 };
 
 export const PdfHighlighterContext = createContext<
