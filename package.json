@@ -45,8 +45,8 @@
 		"react-dom": "^19.1.0"
 	},
 	"dependencies": {
+		"pdfjs-dist": "^5.4.296",
 		"lodash.debounce": "^4.0.8",
-		"pdfjs-dist": "^5.4.149",
 		"react-rnd": "^10.4.11"
 	},
 	"repository": {

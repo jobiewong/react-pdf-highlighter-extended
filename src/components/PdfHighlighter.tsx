@@ -237,7 +237,17 @@ export const PdfHighlighter = ({
 	const isAreaSelectionInProgressRef = useRef(false);
 	const isEditInProgressRef = useRef(false);
 	const updateTipPositionRef = useRef(() => {});
-	const previousPageRef = useRef<number>(1);
+	const previousPageRef = useRef<number | null>(null);
+	const pageChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const pendingPageRef = useRef<number | null>(null);
+	const pendingPageCountRef = useRef<number>(0);
+	const debouncedPageCheckRef = useRef<ReturnType<typeof debounce> | null>(
+		null,
+	);
+	const onPageChangeRef = useRef(onPageChange);
+	const isCheckingPageRef = useRef(false);
+	const lastPageCheckTimeRef = useRef<number>(0);
+	const isPageInitializedRef = useRef(false);
 
 	const eventBusRef = useRef<InstanceType<typeof EventBus>>(new EventBus());
 	const linkServiceRef = useRef<InstanceType<typeof PDFLinkService>>(
@@ -263,7 +273,6 @@ export const PdfHighlighter = ({
 		if (!containerNodeRef.current) return;
 
 		const debouncedDocumentInit = debounce(() => {
-			// Initialize find controller FIRST
 			findControllerRef.current =
 				findControllerRef.current ||
 				new PDFFindController({
@@ -271,7 +280,6 @@ export const PdfHighlighter = ({
 					linkService: linkServiceRef.current,
 				});
 
-			// Then create viewer with findController
 			viewerRef.current =
 				viewerRef.current ||
 				new PDFViewer({
@@ -289,14 +297,6 @@ export const PdfHighlighter = ({
 			findControllerRef.current.setDocument(pdfDocument);
 			setIsViewerReady(true);
 
-			// Initialize current page from viewer (may not be available immediately)
-			// The pagechanged event will update it once the viewer is ready
-			if (viewerRef.current.currentPageNumber) {
-				const initialPage = viewerRef.current.currentPageNumber;
-				setCurrentPage(initialPage);
-				onPageChange?.(initialPage);
-			}
-
 			onViewerReady?.(viewerRef.current);
 		}, 100);
 
@@ -305,21 +305,257 @@ export const PdfHighlighter = ({
 		return () => {
 			debouncedDocumentInit.cancel();
 		};
-	}, [pdfDocument, onViewerReady, onPageChange]);
+	}, [pdfDocument, onViewerReady]);
 
-	// Track page changes on scroll
-	const checkPageChange = useCallback(() => {
-		if (!viewerRef.current) return;
-
-		const newPage = viewerRef.current.currentPageNumber;
-		if (newPage && newPage !== previousPageRef.current) {
-			previousPageRef.current = newPage;
-			setCurrentPage(newPage);
-			onPageChange?.(newPage);
-		}
+	useLayoutEffect(() => {
+		onPageChangeRef.current = onPageChange;
 	}, [onPageChange]);
 
-	// Initialise viewer event listeners
+	const getPrimaryVisiblePage = useCallback((): {
+		page: number;
+		confidence: number;
+	} | null => {
+		if (!viewerRef.current || !containerNodeRef.current) return null;
+
+		const container = viewerRef.current.container;
+		const viewportTop = container.scrollTop;
+		const viewportHeight = container.clientHeight;
+		const viewportBottom = viewportTop + viewportHeight;
+		const viewportCenter = viewportTop + viewportHeight / 2;
+
+		const currentTrackedPage = previousPageRef.current;
+		const pdfJsPage = viewerRef.current.currentPageNumber || 1;
+		let startPage: number;
+		let endPage: number;
+
+		if (currentTrackedPage === null || !isPageInitializedRef.current) {
+			startPage = 1;
+			endPage = pdfDocument.numPages;
+		} else {
+			const pageDiff = Math.abs(pdfJsPage - currentTrackedPage);
+
+			if (pageDiff > 2) {
+				startPage = Math.max(1, pdfJsPage - 3);
+				endPage = Math.min(pdfDocument.numPages, pdfJsPage + 3);
+			} else {
+				startPage = Math.max(1, currentTrackedPage - 2);
+				endPage = Math.min(pdfDocument.numPages, currentTrackedPage + 2);
+			}
+		}
+
+		let bestPage: number | null = null;
+		let bestConfidence = 0;
+		let centerPage: number | null = null;
+		let centerPageConfidence = 0;
+
+		for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+			const pageView = viewerRef.current.getPageView(pageNum - 1);
+			if (!pageView || !pageView.div) continue;
+
+			const pageTop = pageView.div.offsetTop;
+			const pageBottom = pageTop + pageView.div.clientHeight;
+
+			if (viewportCenter >= pageTop && viewportCenter <= pageBottom) {
+				const visibleTop = Math.max(viewportTop, pageTop);
+				const visibleBottom = Math.min(viewportBottom, pageBottom);
+				const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+				const confidence = visibleHeight / viewportHeight;
+
+				if (confidence > centerPageConfidence) {
+					centerPage = pageNum;
+					centerPageConfidence = confidence;
+				}
+			}
+		}
+
+		if (centerPage && centerPageConfidence > 0.35) {
+			return { page: centerPage, confidence: centerPageConfidence };
+		}
+
+		for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+			const pageView = viewerRef.current.getPageView(pageNum - 1);
+			if (!pageView || !pageView.div) continue;
+
+			const pageTop = pageView.div.offsetTop;
+			const pageBottom = pageTop + pageView.div.clientHeight;
+			const visibleTop = Math.max(viewportTop, pageTop);
+			const visibleBottom = Math.min(viewportBottom, pageBottom);
+			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+			const viewportRatio =
+				viewportHeight > 0 ? visibleHeight / viewportHeight : 0;
+
+			if (viewportRatio > 0.4 && viewportRatio > bestConfidence) {
+				bestConfidence = viewportRatio;
+				bestPage = pageNum;
+			}
+		}
+
+		if (
+			!bestPage &&
+			currentTrackedPage !== null &&
+			isPageInitializedRef.current
+		) {
+			return { page: currentTrackedPage, confidence: 0.3 };
+		}
+
+		if (!bestPage && viewerRef.current?.currentPageNumber) {
+			return { page: viewerRef.current.currentPageNumber, confidence: 0.25 };
+		}
+
+		if (!bestPage) {
+			return null;
+		}
+
+		return { page: bestPage, confidence: bestConfidence };
+	}, [pdfDocument.numPages]);
+
+	const checkPageChange = useCallback(() => {
+		if (isCheckingPageRef.current) return;
+
+		const now = Date.now();
+		if (now - lastPageCheckTimeRef.current < 100) {
+			return;
+		}
+		lastPageCheckTimeRef.current = now;
+
+		if (!viewerRef.current) return;
+
+		isCheckingPageRef.current = true;
+
+		try {
+			const pageResult = getPrimaryVisiblePage();
+			if (!pageResult) {
+				isCheckingPageRef.current = false;
+				return;
+			}
+
+			const { page: calculatedPage, confidence } = pageResult;
+			const currentPage = previousPageRef.current;
+
+			if (currentPage !== null && calculatedPage === currentPage) {
+				pendingPageRef.current = null;
+				pendingPageCountRef.current = 0;
+				if (pageChangeTimeoutRef.current) {
+					clearTimeout(pageChangeTimeoutRef.current);
+					pageChangeTimeoutRef.current = null;
+				}
+				isCheckingPageRef.current = false;
+				return;
+			}
+
+			const pageDiff =
+				currentPage === null
+					? Infinity
+					: Math.abs(calculatedPage - currentPage);
+
+			if (pageDiff > 1 || previousPageRef.current === null) {
+				const minConfidence = previousPageRef.current === null ? 0.4 : 0.3;
+
+				if (confidence < minConfidence) {
+					const pdfJsPage = viewerRef.current.currentPageNumber;
+					if (pdfJsPage && pdfJsPage !== previousPageRef.current) {
+						previousPageRef.current = pdfJsPage;
+						setCurrentPage(pdfJsPage);
+						isPageInitializedRef.current = true;
+						onPageChangeRef.current?.(pdfJsPage);
+						pendingPageRef.current = null;
+						pendingPageCountRef.current = 0;
+						if (pageChangeTimeoutRef.current) {
+							clearTimeout(pageChangeTimeoutRef.current);
+							pageChangeTimeoutRef.current = null;
+						}
+						isCheckingPageRef.current = false;
+						return;
+					}
+
+					isCheckingPageRef.current = false;
+					return;
+				}
+
+				previousPageRef.current = calculatedPage;
+				setCurrentPage(calculatedPage);
+				isPageInitializedRef.current = true;
+				onPageChangeRef.current?.(calculatedPage);
+				pendingPageRef.current = null;
+				pendingPageCountRef.current = 0;
+				if (pageChangeTimeoutRef.current) {
+					clearTimeout(pageChangeTimeoutRef.current);
+					pageChangeTimeoutRef.current = null;
+				}
+				isCheckingPageRef.current = false;
+				return;
+			}
+
+			if (pageDiff === 1) {
+				if (confidence > 0.55) {
+					if (pageChangeTimeoutRef.current) {
+						clearTimeout(pageChangeTimeoutRef.current);
+						pageChangeTimeoutRef.current = null;
+					}
+
+					previousPageRef.current = calculatedPage;
+					setCurrentPage(calculatedPage);
+					isPageInitializedRef.current = true;
+					onPageChangeRef.current?.(calculatedPage);
+					pendingPageRef.current = null;
+					pendingPageCountRef.current = 0;
+					isCheckingPageRef.current = false;
+					return;
+				}
+
+				if (pendingPageRef.current === calculatedPage) {
+					pendingPageCountRef.current += 1;
+				} else {
+					pendingPageRef.current = calculatedPage;
+					pendingPageCountRef.current = 1;
+				}
+
+				if (pageChangeTimeoutRef.current) {
+					clearTimeout(pageChangeTimeoutRef.current);
+					pageChangeTimeoutRef.current = null;
+				}
+
+				if (pendingPageCountRef.current >= 2) {
+					pageChangeTimeoutRef.current = setTimeout(() => {
+						if (!viewerRef.current) {
+							isCheckingPageRef.current = false;
+							return;
+						}
+
+						const recheckResult = getPrimaryVisiblePage();
+						if (
+							recheckResult &&
+							recheckResult.page === calculatedPage &&
+							calculatedPage !== previousPageRef.current &&
+							recheckResult.confidence > 0.35
+						) {
+							previousPageRef.current = calculatedPage;
+							setCurrentPage(calculatedPage);
+							isPageInitializedRef.current = true;
+							onPageChangeRef.current?.(calculatedPage);
+						}
+						pendingPageRef.current = null;
+						pendingPageCountRef.current = 0;
+						pageChangeTimeoutRef.current = null;
+						isCheckingPageRef.current = false;
+					}, 500);
+				} else {
+					pageChangeTimeoutRef.current = setTimeout(() => {
+						isCheckingPageRef.current = false;
+						if (pendingPageRef.current === calculatedPage) {
+							checkPageChange();
+						}
+					}, 200);
+				}
+			} else {
+				isCheckingPageRef.current = false;
+			}
+		} catch (error) {
+			console.warn("Error in checkPageChange:", error);
+			isCheckingPageRef.current = false;
+		}
+	}, [getPrimaryVisiblePage]);
+
 	useLayoutEffect(() => {
 		if (!containerNodeRef.current || !viewerRef.current) return;
 
@@ -329,26 +565,56 @@ export const PdfHighlighter = ({
 
 		const doc = containerNodeRef.current.ownerDocument;
 
+		if (!debouncedPageCheckRef.current) {
+			debouncedPageCheckRef.current = debounce(() => {
+				checkPageChange();
+			}, 300);
+		}
+		const debouncedPageCheck = debouncedPageCheckRef.current;
+
 		const handleUpdateViewArea = () => {
-			// Check for page changes when view area updates
-			checkPageChange();
+			if (viewerRef.current && isPageInitializedRef.current) {
+				const pdfJsPage = viewerRef.current.currentPageNumber;
+				const trackedPage = previousPageRef.current;
+
+				if (
+					pdfJsPage &&
+					trackedPage !== null &&
+					Math.abs(pdfJsPage - trackedPage) > 2
+				) {
+					previousPageRef.current = pdfJsPage;
+					setCurrentPage(pdfJsPage);
+					onPageChangeRef.current?.(pdfJsPage);
+					pendingPageRef.current = null;
+					pendingPageCountRef.current = 0;
+					if (pageChangeTimeoutRef.current) {
+						clearTimeout(pageChangeTimeoutRef.current);
+						pageChangeTimeoutRef.current = null;
+					}
+				}
+			}
+
+			debouncedPageCheck();
 		};
 
 		const handlePagesInit = () => {
 			handleScaleValue();
-			// Initialize current page when pages are initialized
-			if (viewerRef.current?.currentPageNumber) {
-				const initialPage = viewerRef.current.currentPageNumber;
-				previousPageRef.current = initialPage;
-				setCurrentPage(initialPage);
-				onPageChange?.(initialPage);
-			}
+			setTimeout(() => {
+				const pageResult = getPrimaryVisiblePage();
+				if (pageResult && pageResult.confidence > 0.3) {
+					previousPageRef.current = pageResult.page;
+					setCurrentPage(pageResult.page);
+					isPageInitializedRef.current = true;
+					onPageChangeRef.current?.(pageResult.page);
+				} else if (viewerRef.current?.currentPageNumber) {
+					const fallbackPage = viewerRef.current.currentPageNumber;
+					previousPageRef.current = fallbackPage;
+					setCurrentPage(fallbackPage);
+					isPageInitializedRef.current = true;
+					onPageChangeRef.current?.(fallbackPage);
+				}
+			}, 200);
 		};
-
-		// Listen to scroll events to track page changes
-		const container = viewerRef.current.container;
-		const debouncedPageCheck = debounce(checkPageChange, 100);
-		container.addEventListener("scroll", debouncedPageCheck);
 
 		eventBusRef.current.on("textlayerrendered", renderHighlightLayers);
 		eventBusRef.current.on("pagesinit", handlePagesInit);
@@ -358,30 +624,35 @@ export const PdfHighlighter = ({
 		renderHighlightLayers();
 
 		return () => {
-			container.removeEventListener("scroll", debouncedPageCheck);
 			eventBusRef.current.off("pagesinit", handlePagesInit);
 			eventBusRef.current.off("textlayerrendered", renderHighlightLayers);
 			eventBusRef.current.off("updateviewarea", handleUpdateViewArea);
 			doc.removeEventListener("keydown", handleKeyDown);
 			resizeObserverRef.current?.disconnect();
 			debouncedScaleValue.cancel();
-			debouncedPageCheck.cancel();
+			if (debouncedPageCheckRef.current) {
+				debouncedPageCheckRef.current.cancel();
+			}
+			if (pageChangeTimeoutRef.current) {
+				clearTimeout(pageChangeTimeoutRef.current);
+				pageChangeTimeoutRef.current = null;
+			}
+			pendingPageRef.current = null;
+			pendingPageCountRef.current = 0;
+			isCheckingPageRef.current = false;
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		selectionTip,
 		highlights,
 		onSelectionFinished,
-		onPageChange,
 		checkPageChange,
+		getPrimaryVisiblePage,
 	]);
 
-	// Event listeners
 	const handleScroll = () => {
 		onScrollAway && onScrollAway();
 		scrolledToHighlightIdRef.current = null;
-		checkPageChange();
-		renderHighlightLayers();
 	};
 
 	const handleMouseUp: PointerEventHandler = () => {
@@ -393,7 +664,6 @@ export const PdfHighlighter = ({
 
 		const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 
-		// Check the selected text is in the document, not the tip
 		if (!range || !container.contains(range.commonAncestorContainer)) return;
 
 		const pages = getPagesFromRange(range);
@@ -653,8 +923,17 @@ export const PdfHighlighter = ({
 			return;
 		}
 
-		// Use PDF.js linkService to navigate (this is the recommended way)
-		linkServiceRef.current.goToPage(pageNumber);
+		// Use scrollPageIntoView instead of linkService.goToPage to prevent scroll resets
+		// This method scrolls the page into view without resetting to top
+		try {
+			viewerRef.current.scrollPageIntoView({
+				pageNumber: pageNumber,
+			});
+		} catch (error) {
+			// Fallback to linkService if scrollPageIntoView fails
+			console.warn("scrollPageIntoView failed, using linkService:", error);
+			linkServiceRef.current.goToPage(pageNumber);
+		}
 	};
 
 	const searchText = (
@@ -714,7 +993,8 @@ export const PdfHighlighter = ({
 			return;
 		}
 
-		eventBusRef.current.dispatch("findagain", {
+		// Re-dispatch find event with findPrevious: false to go to next match
+		eventBusRef.current.dispatch("find", {
 			type: "",
 			query: state.query,
 			caseSensitive: state.caseSensitive,
@@ -737,7 +1017,8 @@ export const PdfHighlighter = ({
 			return;
 		}
 
-		eventBusRef.current.dispatch("findagain", {
+		// Re-dispatch find event with findPrevious: true to go to previous match
+		eventBusRef.current.dispatch("find", {
 			type: "",
 			query: state.query,
 			caseSensitive: state.caseSensitive,
