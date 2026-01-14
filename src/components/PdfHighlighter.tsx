@@ -263,6 +263,15 @@ export const PdfHighlighter = ({
 		if (!containerNodeRef.current) return;
 
 		const debouncedDocumentInit = debounce(() => {
+			// Initialize find controller FIRST
+			findControllerRef.current =
+				findControllerRef.current ||
+				new PDFFindController({
+					eventBus: eventBusRef.current,
+					linkService: linkServiceRef.current,
+				});
+
+			// Then create viewer with findController
 			viewerRef.current =
 				viewerRef.current ||
 				new PDFViewer({
@@ -271,14 +280,7 @@ export const PdfHighlighter = ({
 					textLayerMode: 2,
 					removePageBorders: true,
 					linkService: linkServiceRef.current,
-				});
-
-			// Initialize find controller
-			findControllerRef.current =
-				findControllerRef.current ||
-				new PDFFindController({
-					eventBus: eventBusRef.current,
-					linkService: linkServiceRef.current,
+					findController: findControllerRef.current,
 				});
 
 			viewerRef.current.setDocument(pdfDocument);

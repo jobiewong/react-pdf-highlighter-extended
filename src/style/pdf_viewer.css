@@ -39,3 +39,17 @@ html
 @supports (-ms-ime-align:auto) {
   .textLayer {opacity: 0.5 }
 }
+
+/* Search highlight styles */
+.textLayer .highlight {
+	background-color: rgba(255, 255, 0, 0.4);
+	cursor: pointer;
+}
+
+.textLayer .highlight.selected {
+	background-color: rgba(0, 100, 255, 0.4);
+}
+
+.textLayer .highlightAppend {
+	background-color: rgba(255, 255, 0, 0.4);
+}
