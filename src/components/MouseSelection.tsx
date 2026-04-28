@@ -29,9 +29,15 @@ const getContainerCoords = (
   pageY: number,
 ) => {
   const containerBoundingRect = container.getBoundingClientRect();
+  const containerWindow = container.ownerDocument.defaultView ?? window;
+
   return {
     x: pageX - containerBoundingRect.left + container.scrollLeft,
-    y: pageY - containerBoundingRect.top + container.scrollTop - window.scrollY,
+    y:
+      pageY -
+      containerBoundingRect.top +
+      container.scrollTop -
+      containerWindow.scrollY,
   };
 };
 
@@ -216,19 +222,20 @@ export const MouseSelection = ({
      * Although we register the event listeners on the PdfHighlighter component, we encapsulate
      * them in this separate component to enhance maintainability and prevent unnecessary
      * rerenders of the PdfHighlighter itself. While synthetic events on PdfHighlighter would
-     * be preferable, we need to register "mouseup" on the entire document anyway. Therefore,
+     * be preferable, we need to register "mouseup" on the owner document anyway. Therefore,
      * we can't avoid using useEffect. We must re-register all events on state changes, as
      * custom event listeners may otherwise receive stale state.
      */
+    const ownerDocument = container.ownerDocument;
+
     container.addEventListener("mousemove", handleMouseMove);
     container.addEventListener("mousedown", handleMouseDown);
-
-    document.addEventListener("mouseup", handleMouseUp);
+    ownerDocument.addEventListener("mouseup", handleMouseUp);
 
     return () => {
       container.removeEventListener("mousemove", handleMouseMove);
       container.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mouseup", handleMouseUp);
+      ownerDocument.removeEventListener("mouseup", handleMouseUp);
     };
   }, [start, end]);
 
