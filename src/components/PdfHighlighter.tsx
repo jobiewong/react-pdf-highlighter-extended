@@ -45,11 +45,13 @@ import { TipContainer } from "./TipContainer";
 import type {
   EventBus as TEventBus,
   PDFLinkService as TPDFLinkService,
+  PDFFindController as TPDFFindController,
   PDFViewer as TPDFViewer,
 } from "pdfjs-dist/web/pdf_viewer.mjs";
 
 let EventBus: typeof TEventBus,
   PDFLinkService: typeof TPDFLinkService,
+  PDFFindController: typeof TPDFFindController,
   PDFViewer: typeof TPDFViewer;
 
 (async () => {
@@ -57,6 +59,7 @@ let EventBus: typeof TEventBus,
   const pdfjs = await import("pdfjs-dist/web/pdf_viewer.mjs");
   EventBus = pdfjs.EventBus;
   PDFLinkService = pdfjs.PDFLinkService;
+  PDFFindController = pdfjs.PDFFindController;
   PDFViewer = pdfjs.PDFViewer;
 })();
 
@@ -67,13 +70,13 @@ const DEFAULT_TEXT_SELECTION_COLOR = "rgba(153,193,218,255)";
 const findOrCreateHighlightLayer = (textLayer: HTMLElement) => {
   return findOrCreateContainerLayer(
     textLayer,
-    "PdfHighlighter__highlight-layer"
+    "PdfHighlighter__highlight-layer",
   );
 };
 
 const disableTextSelection = (
   viewer: InstanceType<typeof PDFViewer>,
-  flag: boolean
+  flag: boolean,
 ) => {
   viewer.viewer?.classList.toggle("PdfHighlighter--disable-selection", flag);
 };
@@ -217,7 +220,7 @@ export const PdfHighlighter = ({
   // Refs
   const containerNodeRef = useRef<HTMLDivElement | null>(null);
   const highlightBindingsRef = useRef<{ [page: number]: HighlightBindings }>(
-    {}
+    {},
   );
   const ghostHighlightRef = useRef<GhostHighlight | null>(null);
   const selectionRef = useRef<PdfSelection | null>(null);
@@ -225,14 +228,26 @@ export const PdfHighlighter = ({
   const isAreaSelectionInProgressRef = useRef(false);
   const isEditInProgressRef = useRef(false);
   const updateTipPositionRef = useRef(() => {});
+  const searchStateRef = useRef<{
+    query: string;
+    caseSensitive?: boolean;
+    entireWord?: boolean;
+    highlightAll?: boolean;
+  }>({
+    query: "",
+    highlightAll: true,
+  });
 
   const eventBusRef = useRef<InstanceType<typeof EventBus>>(new EventBus());
   const linkServiceRef = useRef<InstanceType<typeof PDFLinkService>>(
     new PDFLinkService({
       eventBus: eventBusRef.current,
       externalLinkTarget: 2,
-    })
+    }),
   );
+  const findControllerRef = useRef<InstanceType<
+    typeof PDFFindController
+  > | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const viewerRef = useRef<InstanceType<typeof PDFViewer> | null>(null);
 
@@ -241,6 +256,13 @@ export const PdfHighlighter = ({
     if (!containerNodeRef.current) return;
 
     const debouncedDocumentInit = debounce(() => {
+      if (!findControllerRef.current) {
+        findControllerRef.current = new PDFFindController({
+          eventBus: eventBusRef.current,
+          linkService: linkServiceRef.current,
+        });
+      }
+
       viewerRef.current =
         viewerRef.current ||
         new PDFViewer({
@@ -249,6 +271,7 @@ export const PdfHighlighter = ({
           textLayerMode: 2,
           removePageBorders: true,
           linkService: linkServiceRef.current,
+          findController: findControllerRef.current,
         });
 
       viewerRef.current.setDocument(pdfDocument);
@@ -322,7 +345,7 @@ export const PdfHighlighter = ({
 
     const scaledPosition = viewportPositionToScaled(
       viewportPosition,
-      viewerRef.current
+      viewerRef.current,
     );
 
     const content: Content = {
@@ -399,7 +422,7 @@ export const PdfHighlighter = ({
   // Render Highlight layers
   const renderHighlightLayer = (
     highlightBindings: HighlightBindings,
-    pageNumber: number
+    pageNumber: number,
   ) => {
     if (!viewerRef.current) return;
 
@@ -416,7 +439,7 @@ export const PdfHighlighter = ({
           highlightBindings={highlightBindings}
           children={children}
         />
-      </PdfHighlighterContext.Provider>
+      </PdfHighlighterContext.Provider>,
     );
   };
 
@@ -447,7 +470,7 @@ export const PdfHighlighter = ({
 
           renderHighlightLayer(
             highlightBindingsRef.current[pageNumber],
-            pageNumber
+            pageNumber,
           );
         }
       }
@@ -475,7 +498,7 @@ export const PdfHighlighter = ({
     if (viewerRef.current)
       viewerRef.current.viewer?.classList.toggle(
         "PdfHighlighter--disable-selection",
-        isEditInProgressRef.current
+        isEditInProgressRef.current,
       );
   };
 
@@ -511,7 +534,7 @@ export const PdfHighlighter = ({
     viewerRef.current!.container.removeEventListener("scroll", handleScroll);
 
     const pageViewport = viewerRef.current!.getPageView(
-      pageNumber - 1
+      pageNumber - 1,
     ).viewport;
 
     const pageElement = viewerRef.current!.getPageView(pageNumber - 1).div;
@@ -519,7 +542,7 @@ export const PdfHighlighter = ({
     const scaledPosition = scaledToViewport(
       boundingRect,
       pageViewport,
-      usePdfCoordinates
+      usePdfCoordinates,
     );
     const targetScrollTop =
       pageElement.offsetTop +
@@ -544,6 +567,92 @@ export const PdfHighlighter = ({
     }, 100);
   };
 
+  const getCurrentPage = () => {
+    return viewerRef.current?.currentPageNumber ?? 1;
+  };
+
+  const goToPage = (pageNumber: number) => {
+    if (!viewerRef.current) return;
+
+    const targetPage = Math.trunc(pageNumber);
+
+    if (
+      isNaN(targetPage) ||
+      targetPage < 1 ||
+      targetPage > pdfDocument.numPages
+    ) {
+      console.warn(`Invalid page number: ${pageNumber}`);
+      return;
+    }
+
+    viewerRef.current.currentPageNumber = targetPage;
+  };
+
+  const dispatchFindCommand = (
+    type: "find" | "again",
+    query: string,
+    options: {
+      caseSensitive?: boolean;
+      entireWord?: boolean;
+      highlightAll?: boolean;
+      findPrevious?: boolean;
+    } = {},
+  ) => {
+    if (!findControllerRef.current) return;
+
+    eventBusRef.current.dispatch("find", {
+      source: findControllerRef.current,
+      type,
+      query,
+      caseSensitive: options.caseSensitive ?? false,
+      entireWord: options.entireWord ?? false,
+      highlightAll: options.highlightAll ?? true,
+      findPrevious: options.findPrevious ?? false,
+    });
+  };
+
+  const searchText = (
+    query: string,
+    options: {
+      caseSensitive?: boolean;
+      entireWord?: boolean;
+      highlightAll?: boolean;
+      findPrevious?: boolean;
+    } = {},
+  ) => {
+    searchStateRef.current = {
+      query,
+      caseSensitive: options.caseSensitive,
+      entireWord: options.entireWord,
+      highlightAll: options.highlightAll ?? true,
+    };
+
+    dispatchFindCommand("find", query, options);
+  };
+
+  const findNext = () => {
+    dispatchFindCommand("again", searchStateRef.current.query, {
+      ...searchStateRef.current,
+      findPrevious: false,
+    });
+  };
+
+  const findPrevious = () => {
+    dispatchFindCommand("again", searchStateRef.current.query, {
+      ...searchStateRef.current,
+      findPrevious: true,
+    });
+  };
+
+  const clearSearch = () => {
+    searchStateRef.current = {
+      query: "",
+      highlightAll: true,
+    };
+
+    dispatchFindCommand("find", "", { highlightAll: false });
+  };
+
   const pdfHighlighterUtils: PdfHighlighterUtils = {
     isEditingOrHighlighting,
     getCurrentSelection: () => selectionRef.current,
@@ -558,6 +667,12 @@ export const PdfHighlighter = ({
     getTip: () => tip,
     setTip,
     updateTipPosition: updateTipPositionRef.current,
+    getCurrentPage,
+    goToPage,
+    searchText,
+    findNext,
+    findPrevious,
+    clearSearch,
   };
 
   utilsRef(pdfHighlighterUtils);
@@ -602,7 +717,7 @@ export const PdfHighlighter = ({
               viewportPosition,
               scaledPosition,
               image,
-              resetSelection
+              resetSelection,
             ) => {
               selectionRef.current = {
                 content: { image },
